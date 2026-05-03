@@ -301,3 +301,79 @@ def global_align(
         cumulative_drift += gap_shift
 
     return aligned
+
+
+def global_align_dp(metrics: list[SegmentMetrics], silence_regions: list[dict], max_stretch: float = 1.4, drift_penalty: float = 0.25):
+    def silence_after(end_s):
+        for r in silence_regions:
+            if r.get("label") == "silence" and r["start_s"] >= end_s - 0.1:
+                return r["end_s"] - r["start_s"]
+        return 0.0
+
+    def candidate_actions(m):
+        available_gap_s = silence_after(m.source_end)
+        policy_action = decide_action(m, available_gap_s=available_gap_s)
+        candidates = []
+        if policy_action == AlignAction.ACCEPT:
+            candidates.append((AlignAction.ACCEPT, 0.0, 1.0))
+        elif policy_action == AlignAction.MILD_STRETCH:
+            candidates.append((AlignAction.MILD_STRETCH, 0.0, min(m.predicted_stretch, max_stretch)))
+        elif policy_action == AlignAction.GAP_SHIFT:
+            candidates.append((AlignAction.GAP_SHIFT, m.overflow_s, 1.0))
+            candidates.append((AlignAction.MILD_STRETCH, 0.0, min(m.predicted_stretch, max_stretch)))
+        elif policy_action == AlignAction.REQUEST_SHORTER:
+            candidates.append((AlignAction.REQUEST_SHORTER, 0.0, 1.0))
+            if available_gap_s >= m.overflow_s:
+                candidates.append((AlignAction.GAP_SHIFT, m.overflow_s, 1.0))
+        else:
+            candidates.append((AlignAction.FAIL, 0.0, 1.0))
+
+        unique = []
+        for c in candidates:
+            if c not in unique:
+                unique.append(c)
+        return unique
+
+    def action_penalty(m, action, gap_shift_s, stretch_factor, cumulative_drift):
+        if action == AlignAction.ACCEPT:
+            return 0.0
+        if action == AlignAction.MILD_STRETCH:
+            return max(0.0, stretch_factor - 1.0)
+        if action == AlignAction.GAP_SHIFT:
+            return drift_penalty * abs(cumulative_drift + gap_shift_s)
+        if action == AlignAction.REQUEST_SHORTER:
+            return 10.0 + m.overflow_s
+        return 100.0 + m.overflow_s
+
+    states = [(0.0, 0.0, [])]
+
+    for m in metrics:
+        next_states = []
+        for total_penalty, cumulative_drift, partial in states:
+            for action, gap_shift_s, stretch_factor in candidate_actions(m):
+                sched_start = m.source_start + cumulative_drift
+                sched_end = sched_start + m.source_duration_s + gap_shift_s
+                aligned = AlignedSegment(
+                    index=m.index,
+                    original_start=m.source_start,
+                    original_end=m.source_end,
+                    scheduled_start=sched_start,
+                    scheduled_end=sched_end,
+                    text=m.translated_text,
+                    action=action,
+                    gap_shift_s=gap_shift_s,
+                    stretch_factor=stretch_factor,
+                )
+                penalty = total_penalty + action_penalty(
+                    m, action, gap_shift_s, stretch_factor, cumulative_drift
+                )
+                next_states.append((penalty, cumulative_drift + gap_shift_s, partial + [aligned]))
+
+        next_states.sort(key=lambda s: (s[0], abs(s[1])))
+        states = next_states[:32]
+
+    if not states:
+        return []
+
+    best = min(states, key=lambda s: (s[0], abs(s[1])))
+    return best[2]
