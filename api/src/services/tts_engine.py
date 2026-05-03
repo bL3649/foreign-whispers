@@ -409,7 +409,7 @@ def speaker_to_wav_path(speaker: str, target_language: str) -> str | None:
     return None
 
 
-def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=None, speaker_wav: str | None = None):
+def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=None, speaker_wav: str | None = None, voice_map: dict | None = None):
     """Read translated JSON with segment timestamps and produce a time-aligned WAV.
 
     Each segment is individually synthesized and time-stretched to match its
@@ -471,6 +471,11 @@ def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=
                 seg_text = _shorten_segment_text(en_text, seg["text"], target_sec)
 
         speaker = seg.get("speaker", "SPEAKER_00")
+        resolved_speaker_wav = speaker_wav
+        if resolved_speaker_wav is None and voice_map is not None:
+            resolved_speaker_wav = voice_map.get(speaker)
+        if resolved_speaker_wav is None:
+            resolved_speaker_wav = speaker_to_wav_path(speaker, "es")
 
         seg_metas.append({
             "index": i,
@@ -481,7 +486,7 @@ def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=
             "stretch_factor": stretch_factor,
             "aligned_seg": aligned_seg,
             "speaker": speaker,
-            "speaker_wav": speaker_wav or speaker_to_wav_path(speaker, "es"),
+            "speaker_wav": resolved_speaker_wav,
         })
 
     # ── Phase 1: GPU synthesis (concurrent) ───────────────────────────
