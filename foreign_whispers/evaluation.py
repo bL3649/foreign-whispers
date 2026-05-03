@@ -51,3 +51,82 @@ def clip_evaluation_report(
         "n_translation_retries":     n_retry,
         "total_cumulative_drift_s":  round(drift, 3),
     }
+
+
+def dubbing_scorecard(metrics, aligned_segments, align_report):
+    base = clip_evaluation_report(metrics, aligned_segments)
+
+    def clamp(value):
+        if value > 1:
+            return 1
+        elif value < 0:
+            return 0
+        else:
+            return value
+
+    mades = base.get("mean_abs_duration_error_s", 0.0)
+    pss = base.get("pct_severe_stretch", 0.0)
+    tcds = base.get("total_cumulative_drift_s", 0.0)
+    ntr = base.get("n_translation_retries", 0)
+    segments = align_report.get("segments", [])
+
+    timing_error_score = clamp(1.0 - (mades / 2))
+    severe_stretch_score = clamp(1.0 - (pss / 100))
+    drift_score = clamp(1.0 - (abs(tcds) / 10))
+    timing_accuracy = (timing_error_score + severe_stretch_score + drift_score) / 3
+
+    speed_factors = []
+    for segment in segments:
+        if "speed_factor" in segment:
+            speed_factors.append(segment["speed_factor"])
+
+    if len(speed_factors) > 0:
+        speed_error = 0
+        for speed_factor in speed_factors:
+            speed_error += abs(speed_factor - 1.0)
+        speed_error = speed_error / len(speed_factors)
+        naturalness = clamp(1.0 - (speed_error / 0.75))
+    else:
+        stretch_error = 0
+        for segment in aligned_segments:
+            stretch_error += abs(segment.stretch_factor - 1.0)
+        if len(aligned_segments) > 0:
+            stretch_error = stretch_error / len(aligned_segments)
+        naturalness = clamp(1.0 - (stretch_error / 0.75))
+
+    fail_count = 0
+    severe_count = 0
+    for segment in aligned_segments:
+        if segment.action == AlignAction.FAIL:
+            fail_count += 1
+        if segment.stretch_factor > 1.4:
+            severe_count += 1
+
+    total_aligned = max(len(aligned_segments), 1)
+    fail_ratio = fail_count / total_aligned
+    severe_ratio = severe_count / total_aligned
+
+    fail_score = clamp(1.0 - fail_ratio)
+    severe_score = clamp(1.0 - severe_ratio)
+    intelligibility = (fail_score + severe_score) / 2
+
+    retry_ratio = ntr / max(len(metrics), 1)
+    retry_score = clamp(1.0 - retry_ratio)
+    fail_semantic_score = clamp(1.0 - fail_ratio)
+    semantic_fidelity = (retry_score + fail_semantic_score) / 2
+
+    overall = (
+        timing_accuracy
+        + naturalness
+        + intelligibility
+        + semantic_fidelity
+    ) / 4
+
+    return {
+        "timing_accuracy": round(timing_accuracy, 3),
+        "naturalness": round(naturalness, 3),
+        "intelligibility": round(intelligibility, 3),
+        "semantic_fidelity": round(semantic_fidelity, 3),
+        "overall": round(overall, 3),
+        "details": base,
+    }
