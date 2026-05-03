@@ -196,12 +196,12 @@ def files_from_dir(dir_path) -> list:
     return es_files
 
 
-def _synthesize_raw(tts_engine, text: str, wav_path: str) -> bytes | None:
+def _synthesize_raw(tts_engine, text: str, wav_path: str, speaker_wav: str | None = None) -> bytes | None:
     """GPU-bound: call TTS engine and return raw WAV bytes, or None on failure."""
     if not text or not text.strip():
         return None
     try:
-        tts_engine.tts_to_file(text=text, file_path=wav_path)
+        tts_engine.tts_to_file(text=text, file_path=wav_path, speaker_wav=speaker_wav)
         return pathlib.Path(wav_path).read_bytes()
     except Exception as exc:
         print(f"[tts] TTS failed for segment ({exc}), using silence")
@@ -395,6 +395,20 @@ def _compute_speech_offset(source_path: str) -> float:
     return yt_start - whisper_start
 
 
+def speaker_to_wav_path(speaker: str, target_language: str) -> str | None:
+    """Resolve a speaker reference WAV path relative to pipeline_data/speakers."""
+    speakers_dir = pathlib.Path(__file__).parent.parent.parent.parent / "pipeline_data" / "speakers"
+
+    if (speakers_dir / target_language / f"{speaker}.wav").exists():
+        return f"{target_language}/{speaker}.wav"
+    elif (speakers_dir / target_language / "default.wav").exists():
+        return f"{target_language}/default.wav"
+    elif (speakers_dir / "default.wav").exists():
+        return "default.wav"
+
+    return None
+
+
 def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=None):
     """Read translated JSON with segment timestamps and produce a time-aligned WAV.
 
@@ -456,6 +470,8 @@ def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=
                     en_text = en_segs[i].get("text", "")
                 seg_text = _shorten_segment_text(en_text, seg["text"], target_sec)
 
+        speaker = seg.get("speaker", "SPEAKER_00")
+
         seg_metas.append({
             "index": i,
             "text": seg_text,
@@ -464,6 +480,8 @@ def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=
             "target_sec": target_sec,
             "stretch_factor": stretch_factor,
             "aligned_seg": aligned_seg,
+            "speaker": speaker,
+            "speaker_wav": speaker_to_wav_path(speaker, "es"),
         })
 
     # ── Phase 1: GPU synthesis (concurrent) ───────────────────────────
@@ -475,13 +493,13 @@ def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=
     raw_wav_map: dict[int, bytes | None] = {}
 
     with tempfile.TemporaryDirectory() as synth_dir:
-        def _do_synth(idx: int, text: str) -> tuple[int, bytes | None]:
+        def _do_synth(idx: int, text: str, speaker_wav: str | None = None) -> tuple[int, bytes | None]:
             wav_path = str(pathlib.Path(synth_dir) / f"seg_{idx}.wav")
-            return idx, _synthesize_raw(engine, text, wav_path)
+            return idx, _synthesize_raw(engine, text, wav_path, speaker_wav=speaker_wav)
 
         with ThreadPoolExecutor(max_workers=_TTS_WORKERS) as pool:
             futures = {
-                pool.submit(_do_synth, m["index"], m["text"]): m["index"]
+                pool.submit(_do_synth, m["index"], m["text"], m["speaker_wav"]): m["index"]
                 for m in seg_metas
             }
             for fut in as_completed(futures):
