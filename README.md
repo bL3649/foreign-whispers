@@ -247,3 +247,48 @@ cd frontend && pnpm install && pnpm dev
 - ffmpeg (system-wide)
 - deno (for yt-dlp YouTube extraction)
 - NVIDIA GPU recommended for Whisper + Chatterbox inference
+
+---
+
+## Final Project Submission Notes
+
+Follow the setup and run instructions above for your environment. Start the appropriate Docker Compose profile, open the frontend at `http://localhost:8501`, and run the pipeline from the browser.
+
+### Submission Links
+
+Screen recording demo: https://drive.google.com/file/d/1FnmUBTl1WP8w8aJy4QFSBtItDTiqhl9G/view
+
+Sample input video: https://www.youtube.com/watch?v=GYQ5yGV_-Oc
+
+Sample dubbed output video: https://drive.google.com/file/d/1Xb3-hxBvwJyuaPaagZA5L0OrYSmhJBk5/view
+
+Final report: docs/final_report.md
+
+### Demo Environment Note
+
+The screen recording shows the pipeline running in Colab. I used Colab because I did not have access to a local machine with an NVIDIA GPU capable of running the full Docker GPU setup. The same repository code and pipeline stages are used; Colab was used as the GPU execution environment for TTS generation and verification.
+
+### Final Demo Artifact
+
+The final sample output used the aligned non-overlap configuration with per-speaker Spanish reference voices:
+
+`pipeline_data/api/dubbed_videos/c-86ab861/Strait of Hormuz disruption threatens to shake global economy__aligned_nonoverlap_per_speaker.mp4`
+
+This version uses:
+
+- `SPEAKER_00 -> pipeline_data/speakers/es/SPEAKER_00.wav`
+- `SPEAKER_01 -> pipeline_data/speakers/es/SPEAKER_01.wav`
+- `SPEAKER_02 -> pipeline_data/speakers/es/SPEAKER_02.wav`
+
+The aligned non-overlap transcript was used because the original overlapping segment timings produced a TTS WAV much longer than the source video. The non-overlap version keeps the generated audio close to the source video duration and improves playback continuity.
+
+### Main Additions in This Branch
+
+- Duration-aware translation reranking in `foreign_whispers/reranking.py`
+- Diarization endpoint and speaker-label merging
+- Speaker-aware Chatterbox TTS with per-speaker reference WAV selection
+- Improved TTS duration prediction in `foreign_whispers/alignment.py`
+- Dynamic-programming global alignment optimizer
+- Dubbing quality scorecard in `foreign_whispers/evaluation.py`
+- Per-speaker Spanish reference voices in `pipeline_data/speakers/es/`
+
