@@ -188,23 +188,25 @@ def get_shorter_translations(
     if len(without_repetition) <= char_budget and without_repetition != baseline_es:
         candidates.append(TranslationCandidate(without_repetition, len(without_repetition), "removed adjacent repeated words"))
     
-    connectors = {"y", "e", "o", "u", "tras", "por"}
+    connectors = {"y", "e", "o", "u"}
 
     without_repeated_connectors = []
 
-    if len(words) > 0:
-        repeated_word = False
-        for i in range(len(words)):
-            if repeated_word == True:
-                repeated_word = False
-            elif plain_words[i].lower() not in connectors and repeated_word == False:
-                without_repeated_connectors.append(words[i])
-            elif i != len(words) - 1 and i != 0 and (plain_words[i - 1].lower() != plain_words[i + 1].lower()):
-                without_repeated_connectors.append(words[i])
-            else:
-                repeated_word = True
+    i = 0
+    while i < len(words):
+        without_repeated_connectors.append(words[i])
+        current_word = plain_words[i].lower()
+
+        while (
+            i + 2 < len(words)
+            and plain_words[i + 1].lower() in connectors
+            and plain_words[i + 2].lower() == current_word
+        ):
+            i += 2
+
+        i += 1
     
-    without_repeated_connectors= " ".join(without_repeated_connectors)
+    without_repeated_connectors = " ".join(without_repeated_connectors)
 
     if len(without_repeated_connectors) <= char_budget and without_repeated_connectors != baseline_es and without_repeated_connectors != without_repetition:
         candidates.append(TranslationCandidate(without_repeated_connectors, len(without_repeated_connectors), "collapsed repeated connector phrase"))
@@ -215,7 +217,6 @@ def get_shorter_translations(
         "a fin de cuentas",
         "a lo mejor",
         "a todo esto",
-        "a ver",
         "al final",
         "al final del día",
         "al parecer",
